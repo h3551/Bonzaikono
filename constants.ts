@@ -43,10 +43,14 @@ export const STAGE_CONFIG: Record<GrowthStage, {
   potColor: string;
   label: string;
 }> = {
-  [GrowthStage.SEED]: { potDepth: 1.5, potWidth: 2, potColor: '#5d4037', label: 'Germination' },
-  [GrowthStage.SAPLING]: { potDepth: 1.2, potWidth: 2.5, potColor: '#4e342e', label: 'Growth' },
-  [GrowthStage.ADULT]: { potDepth: 0.8, potWidth: 3.5, potColor: '#3e2723', label: 'Refinement' },
-  [GrowthStage.MASTER]: { potDepth: 0.4, potWidth: 4, potColor: '#263238', label: 'Masterpiece' },
+  // Seed: Big flat bowl
+  [GrowthStage.SEED]: { potDepth: 0.8, potWidth: 5.0, potColor: '#5d4037', label: 'Germination' },
+  // Sapling: Slightly smaller and flatter
+  [GrowthStage.SAPLING]: { potDepth: 0.6, potWidth: 4.0, potColor: '#4e342e', label: 'Growth' },
+  // Adult: Smaller and flatter
+  [GrowthStage.ADULT]: { potDepth: 0.45, potWidth: 3.5, potColor: '#3e2723', label: 'Refinement' },
+  // Master: Same size but flattest
+  [GrowthStage.MASTER]: { potDepth: 0.25, potWidth: 3.5, potColor: '#263238', label: 'Masterpiece' },
 };
 
 export const MAX_STATS = 100;

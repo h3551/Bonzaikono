@@ -1,10 +1,11 @@
-import React, { useMemo, useRef } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { TreeData, GrowthStage, TreeSpecies } from '../types';
 import { SPECIES_CONFIG, STAGE_CONFIG } from '../constants';
 
-// String hashing function for seeded random behavior from DNA
+// --- RNG Utilities ---
+
 const cyrb53 = (str: string, seed = 0) => {
   let h1 = 0xdeadbeef ^ seed, h2 = 0x41c6ce57 ^ seed;
   for (let i = 0, ch; i < str.length; i++) {
@@ -17,217 +18,275 @@ const cyrb53 = (str: string, seed = 0) => {
   return 4294967296 * (2097151 & h2) + (h1 >>> 0);
 };
 
-// Returns a float between 0 and 1
-const getDnaRandom = (dna: string[], depth: number, offset: number) => {
-  // Use the specific DNA segment corresponding to the depth/growth stage if available
-  // Default to the first segment (seed) if we are deeper than current history
-  const segmentIndex = Math.min(Math.floor(depth / 2), dna.length - 1);
-  const segment = dna[segmentIndex] || dna[0] || 'DEFAULT';
-  const val = cyrb53(segment + depth + offset);
+const getDnaFloat = (dna: string[], cursor: number) => {
+  const segmentIdx = Math.floor(cursor / 10) % (dna?.length || 1);
+  const segment = (dna && dna[segmentIdx]) ? dna[segmentIdx] : 'SEED';
+  const val = cyrb53(`${segment}-${cursor}`);
   return (val % 1000) / 1000;
 };
 
-// A recursive branch component to generate the tree structure
-interface BranchProps {
-  position: [number, number, number];
-  rotation: [number, number, number];
-  length: number;
-  radius: number;
-  depth: number;
-  maxDepth: number;
-  species: TreeSpecies;
-  pruneState: number; // Random seed for missing branches
-  wireState: number; // Influences curvature
-  dna: string[];
-}
+// --- Canvas Drawing Logic ---
 
-const Branch: React.FC<BranchProps> = ({ 
-  position, 
-  rotation, 
-  length, 
-  radius, 
-  depth, 
-  maxDepth, 
-  species,
-  pruneState,
-  wireState,
-  dna
-}) => {
-  const config = SPECIES_CONFIG[species];
-  const isEnd = depth >= maxDepth;
+const drawLeaf = (
+  ctx: CanvasRenderingContext2D, 
+  species: TreeSpecies, 
+  config: any, 
+  scale: number,
+  time: number
+) => {
+  ctx.fillStyle = config.colorLeaf;
+  const sway = Math.sin(time * 2 + Math.random() * 10) * 0.1;
+  ctx.rotate(sway);
+
+  if (species === TreeSpecies.PINE) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 6 * scale, 0, Math.PI * 2);
+    ctx.fill();
+    // Needles
+    ctx.strokeStyle = config.colorLeaf;
+    ctx.lineWidth = 1 * scale;
+    for(let i=0; i<8; i++) {
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        const ang = (i/8) * Math.PI * 2;
+        ctx.lineTo(Math.cos(ang) * 12 * scale, Math.sin(ang) * 12 * scale);
+        ctx.stroke();
+    }
+  } else if (species === TreeSpecies.CHERRY) {
+    ctx.beginPath();
+    ctx.arc(0, 0, 5 * scale, 0, Math.PI * 2);
+    ctx.fillStyle = Math.random() > 0.5 ? config.colorLeaf : '#fed7aa'; 
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 8 * scale, 12 * scale, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.rotate(-sway);
+};
+
+const drawBranch = (
+  ctx: CanvasRenderingContext2D,
+  len: number,
+  depth: number,
+  maxDepth: number,
+  cursor: number,
+  dna: string[],
+  species: TreeSpecies,
+  config: any,
+  time: number
+) => {
+  ctx.save();
   
-  // Use DNA for deterministic structure
-  const rndStructure = getDnaRandom(dna, depth, 100);
-  const rndAngle = getDnaRandom(dna, depth, 200);
+  const width = Math.max(1, (maxDepth - depth) * 3);
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = config.colorBark;
+
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
   
-  // Pruning logic
-  if (depth > 1 && getDnaRandom(dna, depth, 300 + pruneState) > 0.85) {
-    return null; 
+  const staticCurve = (getDnaFloat(dna, cursor + 1) - 0.5) * 20 * (len / 100);
+  const windSway = Math.sin(time + depth * 0.5) * (depth * 1.5); 
+  
+  ctx.quadraticCurveTo(staticCurve + windSway, -len / 2, 0 + windSway * 0.5, -len);
+  ctx.stroke();
+
+  if (depth > maxDepth - 3 || depth === maxDepth) {
+     if (getDnaFloat(dna, cursor + 99) > 0.4) {
+        ctx.save();
+        ctx.translate(0 + windSway * 0.5, -len);
+        drawLeaf(ctx, species, config, 1.5, time);
+        ctx.restore();
+     }
   }
 
-  // Wiring logic: modify angles
-  const curveMod = wireState * 0.2; 
+  if (depth < maxDepth) {
+    ctx.translate(0 + windSway * 0.5, -len);
+    
+    const branchCount = Math.floor(getDnaFloat(dna, cursor + 2) * 2) + 2; 
+    let spread = 0.8; 
+    if (species === TreeSpecies.PINE) spread = 0.6;
+    if (species === TreeSpecies.OAK) spread = 1.0;
 
-  const nextLength = length * (0.75 + (rndStructure * 0.1)); // DNA affects length decay
-  const nextRadius = radius * 0.7;
-
-  // Calculate child branches
-  const childCount = isEnd ? 0 : 2; 
-  const children = [];
-
-  if (!isEnd) {
-    for (let i = 0; i < childCount; i++) {
-      // DNA drives the angle variance
-      const angleVariance = (rndAngle * 0.6 - 0.3); 
-      const angleOffset = (i === 0 ? 0.6 : -0.6) + angleVariance + curveMod;
-      
-      const rotX = (getDnaRandom(dna, depth + 1, i * 50) * 0.6);
-      const rotZ = angleOffset;
-      
-      children.push(
-        <Branch
-          key={i}
-          position={[0, length, 0]}
-          rotation={[rotX, 0, rotZ]}
-          length={nextLength}
-          radius={nextRadius}
-          depth={depth + 1}
-          maxDepth={maxDepth}
-          species={species}
-          pruneState={pruneState}
-          wireState={wireState}
-          dna={dna}
-        />
-      );
+    for (let i = 0; i < branchCount; i++) {
+        const variance = (getDnaFloat(dna, cursor + 10 + i) - 0.5) * 0.5;
+        const baseAngle = ((i / (branchCount - 1)) - 0.5) * spread * 2; 
+        const branchSway = Math.sin(time * 1.5 + depth) * 0.05;
+        const angle = baseAngle + variance + branchSway;
+        const decay = 0.7 + (getDnaFloat(dna, cursor + 20 + i) * 0.1);
+        
+        ctx.save();
+        ctx.rotate(angle);
+        drawBranch(
+            ctx, 
+            len * decay, 
+            depth + 1, 
+            maxDepth, 
+            cursor + 100 + (i * 50), 
+            dna, 
+            species, 
+            config,
+            time
+        );
+        ctx.restore();
     }
   }
 
-  // Leaf Color variation based on DNA
-  const leafColor = useMemo(() => {
-    const baseColor = new THREE.Color(config.colorLeaf);
-    const shift = (getDnaRandom(dna, maxDepth, 999) - 0.5) * 0.1;
-    return baseColor.offsetHSL(0, 0, shift);
-  }, [config.colorLeaf, dna, maxDepth]);
-
-  return (
-    <group position={position} rotation={rotation}>
-      {/* Wood Segment */}
-      <mesh position={[0, length / 2, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[nextRadius, radius, length, 8]} />
-        <meshStandardMaterial color={config.colorBark} roughness={0.9} />
-      </mesh>
-
-      {/* Foliage at the end of terminal branches */}
-      {isEnd && (
-        <group position={[0, length, 0]}>
-          <mesh scale={[1, 1, 1]} castShadow receiveShadow>
-             {/* Using Dodecahedron for low-poly leaf cluster look */}
-            <dodecahedronGeometry args={[0.4, 0]} />
-            <meshStandardMaterial color={leafColor} />
-          </mesh>
-          <mesh position={[0.3, 0.2, 0]} scale={[0.7, 0.7, 0.7]} castShadow>
-            <dodecahedronGeometry args={[0.4, 0]} />
-            <meshStandardMaterial color={leafColor} />
-          </mesh>
-           <mesh position={[-0.2, 0.3, 0.2]} scale={[0.8, 0.8, 0.8]} castShadow>
-            <dodecahedronGeometry args={[0.4, 0]} />
-            <meshStandardMaterial color={leafColor} />
-          </mesh>
-        </group>
-      )}
-
-      {children}
-    </group>
-  );
+  ctx.restore();
 };
 
-// --- Custom Seed Component ---
-// Visualizes the initial seed based on DNA, stylized as a 2D-viewed-in-3D object (extruded shape)
-const SeedObject: React.FC<{ dna: string[], species: TreeSpecies }> = ({ dna, species }) => {
-  const seedHash = getDnaRandom(dna, 0, 1);
-  const color = SPECIES_CONFIG[species].colorBark;
-  
-  return (
-    <group position={[0, 0.1, 0]}>
-      {/* Seed Body */}
-      <mesh castShadow receiveShadow position={[0, 0.1, 0]}>
-         {/* Slightly randomized seed shape */}
-        <capsuleGeometry args={[0.15 + (seedHash * 0.05), 0.3 + (seedHash * 0.1), 4, 8]} /> 
-        <meshStandardMaterial color={color} roughness={0.6} />
-      </mesh>
-      
-      {/* A tiny sprout indicator if it's healthy */}
-      <mesh position={[0.1, 0.2, 0]} rotation={[0, 0, -0.5]}>
-         <planeGeometry args={[0.1, 0.2]} />
-         <meshStandardMaterial color="#8bc34a" side={THREE.DoubleSide} transparent opacity={0.8} />
-      </mesh>
-    </group>
-  );
+const drawSeed = (ctx: CanvasRenderingContext2D, width: number, height: number, color: string, time: number) => {
+    // Position seed near bottom so it sits in pot
+    const cx = width / 2;
+    const cy = height - 100; 
+    
+    ctx.translate(cx, cy);
+    const pulse = Math.sin(time * 2) * 0.1 + 4; 
+    ctx.scale(pulse, pulse); 
+    
+    // Seed Body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 10, 15, 0.2, 0, Math.PI * 2);
+    ctx.fill();
+    
+    // Tiny Sprout
+    ctx.beginPath();
+    ctx.moveTo(0, -10);
+    const sway = Math.sin(time * 3) * 5;
+    ctx.quadraticCurveTo(5 + sway, -25, 10 + sway, -30);
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = '#84cc16'; 
+    ctx.stroke();
+    
+    // Leaf
+    ctx.beginPath();
+    ctx.ellipse(10 + sway, -30, 6, 4, 0.5 + sway * 0.05, 0, Math.PI*2);
+    ctx.fillStyle = '#84cc16';
+    ctx.fill();
 };
+
+// --- Main Component ---
 
 interface TreeRenderProps {
   tree: TreeData;
 }
 
 export const TreeRender: React.FC<TreeRenderProps> = ({ tree }) => {
-  const groupRef = useRef<THREE.Group>(null);
+  // Stable initialization of canvas resources
+  const [canvasResources] = useState(() => {
+    if (typeof document === 'undefined') return null;
+    const canvas = document.createElement('canvas');
+    canvas.width = 1024;
+    canvas.height = 1024;
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return { canvas, tex };
+  });
 
-  // Calculate complexity based on stage/age
   const complexity = useMemo(() => {
     switch (tree.stage) {
       case GrowthStage.SEED: return 0;
-      case GrowthStage.SAPLING: return 3;
-      case GrowthStage.ADULT: return 5;
-      case GrowthStage.MASTER: return 7; // Increased depth for master
+      case GrowthStage.SAPLING: return 4;
+      case GrowthStage.ADULT: return 7;
+      case GrowthStage.MASTER: return 9;
       default: return 1;
     }
   }, [tree.stage]);
 
   const potConfig = STAGE_CONFIG[tree.stage];
+  const speciesConfig = SPECIES_CONFIG[tree.species];
 
-  // Animation for gentle swaying
   useFrame((state) => {
-    if (groupRef.current && tree.stage !== GrowthStage.SEED) {
-      const swaySpeed = tree.stage === GrowthStage.MASTER ? 0.3 : 0.5;
-      groupRef.current.rotation.z = Math.sin(state.clock.elapsedTime * swaySpeed) * 0.02;
+    if (!canvasResources) return;
+    const { canvas, tex } = canvasResources;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const time = state.clock.elapsedTime;
+
+    // Clear
+    ctx.clearRect(0, 0, 1024, 1024);
+    
+    // Debug/Artistic Border
+    ctx.strokeStyle = '#292524'; // stone-800
+    ctx.lineWidth = 15;
+    ctx.strokeRect(10, 10, 1004, 1004);
+
+    if (tree.stage === GrowthStage.SEED) {
+        drawSeed(ctx, 1024, 1024, speciesConfig.colorBark, time);
+    } else {
+        // Start near bottom center
+        const startLen = 140; 
+        const startX = 512;
+        const startY = 950; 
+        
+        const dna = tree.dna || [tree.species];
+        
+        ctx.translate(startX, startY);
+        drawBranch(
+            ctx, 
+            startLen, 
+            1, 
+            complexity, 
+            0, 
+            dna, 
+            tree.species, 
+            speciesConfig,
+            time
+        );
+        ctx.setTransform(1, 0, 0, 1, 0, 0); 
     }
+
+    tex.needsUpdate = true;
   });
 
-  // Ensure DNA exists for legacy data support
-  const dna = tree.dna || [tree.species + 'INIT'];
+  if (!canvasResources) return null;
 
   return (
-    <group ref={groupRef}>
-      {/* Pot */}
+    <group>
+      {/* Pot - Bowl Shape (Top wider than bottom) */}
       <mesh position={[0, potConfig.potDepth / 2, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[potConfig.potWidth, potConfig.potWidth * 0.8, potConfig.potDepth, 32]} />
-        <meshStandardMaterial color={potConfig.potColor} roughness={0.8} />
+        <cylinderGeometry args={[potConfig.potWidth / 2, potConfig.potWidth / 2 * 0.7, potConfig.potDepth, 32]} />
+        <meshStandardMaterial color={potConfig.potColor} roughness={0.7} />
       </mesh>
       
       {/* Soil */}
-      <mesh position={[0, potConfig.potDepth - 0.1, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
-        <circleGeometry args={[potConfig.potWidth * 0.95, 32]} />
+      <mesh position={[0, potConfig.potDepth - 0.02, 0]} rotation={[-Math.PI/2, 0, 0]} receiveShadow>
+        <circleGeometry args={[potConfig.potWidth / 2 * 0.9, 32]} />
         <meshStandardMaterial color="#3e2723" roughness={1} />
       </mesh>
 
-      {/* Tree Logic */}
-      <group position={[0, potConfig.potDepth - 0.2, 0]}>
-        {tree.stage === GrowthStage.SEED ? (
-          <SeedObject dna={dna} species={tree.species} />
-        ) : (
-          <Branch 
-            position={[0, 0, 0]} 
-            rotation={[0, 0, 0]}
-            length={1.5}
-            radius={0.3}
-            depth={0}
-            maxDepth={complexity}
-            species={tree.species}
-            pruneState={tree.pruningCount}
-            wireState={tree.wiringState}
-            dna={dna}
-          />
-        )}
+      {/* Tree Planes */}
+      <group position={[0, potConfig.potDepth, 0]}>
+         {/* Main Plane */}
+         <mesh position={[0, 2.5, 0]} castShadow>
+             <planeGeometry args={[5, 5]} />
+             <meshStandardMaterial 
+                 map={canvasResources.tex} 
+                 transparent={true}
+                 alphaTest={0.05} // Low alpha test to catch semi-transparent edges if any, but stroke is opaque
+                 side={THREE.DoubleSide} 
+                 roughness={1}
+                 metalness={0}
+             />
+         </mesh>
+         
+         {/* Cross Plane (Only for non-seeds to give volume) */}
+         {tree.stage !== GrowthStage.SEED && (
+             <mesh position={[0, 2.5, 0]} rotation={[0, Math.PI / 2, 0]} castShadow>
+                 <planeGeometry args={[5, 5]} />
+                 <meshStandardMaterial 
+                    map={canvasResources.tex} 
+                    transparent={true}
+                    alphaTest={0.05} 
+                    side={THREE.DoubleSide}
+                    roughness={1}
+                    color="#e5e5e5" // Slightly darker for fake shading
+                 />
+             </mesh>
+         )}
       </group>
     </group>
   );
