@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Zen Bonsai</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Lato:wght@300;400;700&display=swap" rel="stylesheet">
+    <script>
+      tailwind.config = {
+        theme: {
+          extend: {
+            fontFamily: {
+              serif: ['Cinzel', 'serif'],
+              sans: ['Lato', 'sans-serif'],
+            },
+            colors: {
+              stone: {
+                50: '#fafaf9',
+                100: '#f5f5f4',
+                200: '#e7e5e4',
+                300: '#d6d3d1',
+                400: '#a8a29e',
+                500: '#78716c',
+                600: '#57534e',
+                700: '#44403c',
+                800: '#292524',
+                900: '#1c1917',
+              },
+              zen: {
+                green: '#4a5d23',
+                paper: '#f0efe9',
+                ink: '#2b2b2b',
+                accent: '#bf4e30'
+              }
+            },
+            animation: {
+              'slide-in': 'slideIn 0.5s cubic-bezier(0.16, 1, 0.3, 1)',
+              'fade-in': 'fadeIn 0.5s ease-out',
+            },
+            keyframes: {
+              slideIn: {
+                '0%': { transform: 'translateX(20px)', opacity: '0' },
+                '100%': { transform: 'translateX(0)', opacity: '1' },
+              },
+              fadeIn: {
+                '0%': { opacity: '0' },
+                '100%': { opacity: '1' },
+              }
+            }
+          }
+        }
+      }
+    </script>
+    <style>
+      body { margin: 0; overflow: hidden; background-color: #f0efe9; }
+      /* Custom scrollbar for webkit */
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 3px; }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
+    "react/": "https://esm.sh/react@^19.2.1/",
+    "@google/genai": "https://esm.sh/@google/genai@^1.32.0",
+    "@react-three/fiber": "https://esm.sh/@react-three/fiber@^9.4.2",
+    "three": "https://esm.sh/three@^0.182.0",
+    "@react-three/drei": "https://esm.sh/@react-three/drei@^10.7.7",
+    "lucide-react": "https://esm.sh/lucide-react@^0.559.0"
+  }
+}
+</script>
+</head>
+  <body>
+    <div id="root"></div>
+  </body>
+</html>
